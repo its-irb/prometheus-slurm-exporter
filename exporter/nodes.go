@@ -30,6 +30,8 @@ type NodeMetric struct {
 	RealMemory  float64  `json:"real_memory"`
 	State       string   `json:"state"`
 	Weight      float64  `json:"weight"`
+	GPUs        float64  `json:"gpu"`
+	AllocGPUs   float64  `json:"agpu"`
 }
 
 type sinfoResponse struct {
@@ -128,6 +130,8 @@ func (cmf *NodeCliFallbackFetcher) fetch() ([]NodeMetric, error) {
 			State      string     `json:"s"`
 			Weight     float64    `json:"w"`
 			AllocMem   float64    `json:"amem"`
+			Gpu        float64    `json:"gpu"`
+			AGpu       float64    `json:"agpu"`
 		}
 		if err := json.Unmarshal(line, &metric); err != nil {
 			cmf.errorCounter.Inc()
@@ -183,6 +187,8 @@ func (cmf *NodeCliFallbackFetcher) fetch() ([]NodeMetric, error) {
 				IdleCpus:    idle,
 				Weight:      metric.Weight,
 				CpuLoad:     float64(metric.CpuLoad),
+				GPUs:        metric.Gpu,
+				AllocGPUs:   metric.AGpu,
 			}
 		}
 	}
@@ -207,6 +213,8 @@ type PartitionMetric struct {
 	CpuLoad          float64
 	IdleCpus         float64
 	Weight           float64
+	GPUs             float64
+	AllocGPUs        float64
 }
 
 func fetchNodePartitionMetrics(nodes []NodeMetric) map[string]*PartitionMetric {
@@ -231,6 +239,8 @@ func fetchNodePartitionMetrics(nodes []NodeMetric) map[string]*PartitionMetric {
 			partition.IdleCpus += node.IdleCpus
 			partition.RealMemory += node.RealMemory
 			partition.Weight += node.Weight
+			partition.GPUs += node.GPUs
+			partition.AllocGPUs += node.AllocGPUs
 		}
 	}
 	return partitions
@@ -303,6 +313,8 @@ type NodesCollector struct {
 	partitionIdleCpus    *prometheus.Desc
 	partitionWeight      *prometheus.Desc
 	partitionCpuLoad     *prometheus.Desc
+	partitionGPUs        *prometheus.Desc
+	partitionAllocGPUs   *prometheus.Desc
 	// cpu summary stats
 	cpusPerState      *prometheus.Desc
 	totalCpus         *prometheus.Desc
@@ -335,10 +347,12 @@ func NewNodeCollecter(config *Config) *NodesCollector {
 		fetcher: fetcher,
 		// partition stats
 		partitionCpus:        prometheus.NewDesc("slurm_partition_total_cpus", "Total cpus per partition", []string{"partition"}, nil),
+		partitionGPUs:        prometheus.NewDesc("slurm_partition_total_gpus", "Total cpus per partition", []string{"partition"}, nil),
 		partitionRealMemory:  prometheus.NewDesc("slurm_partition_real_mem", "Real mem per partition", []string{"partition"}, nil),
 		partitionFreeMemory:  prometheus.NewDesc("slurm_partition_free_mem", "Free mem per partition", []string{"partition"}, nil),
 		partitionAllocMemory: prometheus.NewDesc("slurm_partition_alloc_mem", "Alloc mem per partition per state", []string{"partition", "state"}, nil),
 		partitionAllocCpus:   prometheus.NewDesc("slurm_partition_alloc_cpus", "Alloc cpus per partition per state", []string{"partition", "state"}, nil),
+		partitionAllocGPUs:   prometheus.NewDesc("slurm_partition_alloc_gpus", "Alloc gpus per partition per state", []string{"partition"}, nil),
 		partitionNodeCount:   prometheus.NewDesc("slurm_partition_node_count", "Node count per partition per state", []string{"partition", "state"}, nil),
 		partitionIdleCpus:    prometheus.NewDesc("slurm_partition_idle_cpus", "Idle cpus per partition", []string{"partition"}, nil),
 		partitionWeight:      prometheus.NewDesc("slurm_partition_weight", "Total node weight per partition??", []string{"partition"}, nil),
@@ -369,6 +383,8 @@ func (nc *NodesCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- nc.partitionIdleCpus
 	ch <- nc.partitionRealMemory
 	ch <- nc.partitionWeight
+	ch <- nc.partitionGPUs
+	ch <- nc.partitionAllocGPUs
 	ch <- nc.totalCpus
 	ch <- nc.totalIdleCpus
 	ch <- nc.cpusPerState
@@ -419,6 +435,12 @@ func (nc *NodesCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 		if metric.Weight > 0 {
 			ch <- prometheus.MustNewConstMetric(nc.partitionWeight, prometheus.GaugeValue, metric.Weight, partition)
+		}
+		if metric.GPUs > 0 {
+			ch <- prometheus.MustNewConstMetric(nc.partitionGPUs, prometheus.GaugeValue, metric.GPUs, partition)
+		}
+		if metric.AllocGPUs > 0 {
+			ch <- prometheus.MustNewConstMetric(nc.partitionAllocGPUs, prometheus.GaugeValue, metric.AllocGPUs, partition)
 		}
 	}
 	// node cpu summary set

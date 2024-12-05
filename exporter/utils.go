@@ -137,7 +137,7 @@ func (cf *CliScraper) FetchRawBytes() ([]byte, error) {
 		sinfoMainWrite.Close()
 	}()
 
-	sinfoAMemRaw := exec.Command("sinfo", []string{"--all", "-e", "-h", "-O", "NodeAddr,PartitionName,AllocMem"}...)
+	sinfoAMemRaw := exec.Command("sinfo", []string{"--all", "-e", "-h", "-O", "NodeAddr,PartitionName,AllocMem,Gres:30,GresUsed:30"}...)
 	sinfoAMemJsonifyRead, sinfoAMemJsonifyWrite := io.Pipe()
 	sinfoAMemRaw.Stdout = sinfoAMemJsonifyWrite
 
@@ -150,7 +150,7 @@ func (cf *CliScraper) FetchRawBytes() ([]byte, error) {
 		sinfoAMemJsonifyWrite.Close()
 	}()
 
-	sinfoAMemJsonify := exec.Command("sh", "-c", "tr -s ' ' | jq -nR -c '[inputs | split(\" \") | {n: .[0], p: .[1], amem: .[2]|tonumber }]'")
+	sinfoAMemJsonify := exec.Command("sh", "-c", "tr -s ' ' | awk '{if ($4 == \"(null)\") {$4 = \"0\"} else if (match($4,/gpu:([a-zA-Z][^:]*:)?([0-9]+)/, m)) {$4=m[2]} if (match($5,/gpu:([a-zA-Z][^:]*:)?([0-9]+)/, m)) {$5=m[2]}  print}' | jq -nR -c '[inputs | split(\" \") | {n: .[0], p: .[1], amem: .[2]|tonumber , gpu: .[3]|tonumber, agpu: .[4]|tonumber}]'")
 	sinfoAMemJsonify.Stdin = sinfoAMemJsonifyRead
 	sinfoAMemRead, sinfoAMemWrite := io.Pipe()
 	sinfoAMemJsonify.Stdout = sinfoAMemWrite
