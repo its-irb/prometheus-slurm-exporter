@@ -178,7 +178,7 @@ func (cmf *NodeCliFallbackFetcher) fetch() ([]NodeMetric, error) {
 				FreeMemory:  float64(metric.FreeMemory),
 				Partitions:  []string{metric.Partition},
 				State:       metric.State,
-				AllocMemory: metric.AllocMem*1e6, // AllocMemory: metric.RealMemory - float64(metric.FreeMemory),
+				AllocMemory: metric.AllocMem * 1e6, // AllocMemory: metric.RealMemory - float64(metric.FreeMemory),
 				AllocCpus:   allocated,
 				IdleCpus:    idle,
 				Weight:      metric.Weight,

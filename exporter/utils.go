@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -15,7 +16,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"io"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/exp/slog"
@@ -117,8 +117,8 @@ func (cf *CliScraper) FetchRawBytes() ([]byte, error) {
 	if errb.Len() > 0 {
 		return nil, fmt.Errorf("cmd failed with %s", errb.String())
 	}
-	
-	if (cf.args[0] != "sinfo" || !strings.Contains(cf.args[len(cf.args)-1],`{"s": "%T", "mem": %m, "n": "%n", "l": "%O", "p": "%R", "fmem": "%e", "cstate": "%C", "w": %w}`)) {
+
+	if cf.args[0] != "sinfo" || !strings.Contains(cf.args[len(cf.args)-1], `{"s": "%T", "mem": %m, "n": "%n", "l": "%O", "p": "%R", "fmem": "%e", "cstate": "%C", "w": %w}`) {
 		return outb.Bytes(), nil
 	}
 
@@ -137,7 +137,7 @@ func (cf *CliScraper) FetchRawBytes() ([]byte, error) {
 		sinfoMainWrite.Close()
 	}()
 
-	sinfoAMemRaw := exec.Command("sinfo", []string{"--all","-e","-h","-O","NodeAddr,PartitionName,AllocMem"}...)
+	sinfoAMemRaw := exec.Command("sinfo", []string{"--all", "-e", "-h", "-O", "NodeAddr,PartitionName,AllocMem"}...)
 	sinfoAMemJsonifyRead, sinfoAMemJsonifyWrite := io.Pipe()
 	sinfoAMemRaw.Stdout = sinfoAMemJsonifyWrite
 
@@ -167,23 +167,22 @@ func (cf *CliScraper) FetchRawBytes() ([]byte, error) {
 	combinedReader := io.MultiReader(sinfoMainRead, sinfoAMemRead)
 
 	/*
-	processedOutput, _ = io.ReadAll(combinedReader)
-	slog.Error(fmt.Sprintf("%s","combinedReader json"))
-    slog.Error(fmt.Sprintf("%s",string(processedOutput)))
+			processedOutput, _ = io.ReadAll(combinedReader)
+			slog.Error(fmt.Sprintf("%s","combinedReader json"))
+		    slog.Error(fmt.Sprintf("%s",string(processedOutput)))
 	*/
 
-	combined := exec.Command("jq",[]string{"-c","--slurp",".[0][] as $file1 | .[1][] as $file2 | select($file1.n == $file2.n and $file1.p == $file2.p) | ($file1 + $file2)"}...)
+	combined := exec.Command("jq", []string{"-c", "--slurp", ".[0][] as $file1 | .[1][] as $file2 | select($file1.n == $file2.n and $file1.p == $file2.p) | ($file1 + $file2)"}...)
 
 	combined.Stdin = combinedReader
 
-	var combinedOut,combinedErr bytes.Buffer
+	var combinedOut, combinedErr bytes.Buffer
 	combined.Stdout = &combinedOut
 	combined.Stderr = &combinedErr
 
 	if err := combined.Start(); err != nil {
 		return nil, err
 	}
-
 
 	if err := combined.Wait(); err != nil {
 		slog.Error(fmt.Sprintf("failed to wait for combined jq command: %v", err))
