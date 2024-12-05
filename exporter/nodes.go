@@ -127,6 +127,7 @@ func (cmf *NodeCliFallbackFetcher) fetch() ([]NodeMetric, error) {
 			CpuLoad    NAbleFloat `json:"l"`
 			State      string     `json:"s"`
 			Weight     float64    `json:"w"`
+			AllocMem   float64    `json:"amem"`
 		}
 		if err := json.Unmarshal(line, &metric); err != nil {
 			cmf.errorCounter.Inc()
@@ -177,7 +178,7 @@ func (cmf *NodeCliFallbackFetcher) fetch() ([]NodeMetric, error) {
 				FreeMemory:  float64(metric.FreeMemory),
 				Partitions:  []string{metric.Partition},
 				State:       metric.State,
-				AllocMemory: metric.RealMemory - float64(metric.FreeMemory),
+				AllocMemory: metric.AllocMem*1e6, // AllocMemory: metric.RealMemory - float64(metric.FreeMemory),
 				AllocCpus:   allocated,
 				IdleCpus:    idle,
 				Weight:      metric.Weight,

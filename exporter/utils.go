@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"io"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/exp/slog"
@@ -116,7 +117,82 @@ func (cf *CliScraper) FetchRawBytes() ([]byte, error) {
 	if errb.Len() > 0 {
 		return nil, fmt.Errorf("cmd failed with %s", errb.String())
 	}
-	return outb.Bytes(), nil
+	
+	if (cf.args[0] != "sinfo" || !strings.Contains(cf.args[len(cf.args)-1],`{"s": "%T", "mem": %m, "n": "%n", "l": "%O", "p": "%R", "fmem": "%e", "cstate": "%C", "w": %w}`)) {
+		return outb.Bytes(), nil
+	}
+
+	sinfoMainJsonify := exec.Command("jq", []string{"-s", "-c", "."}...)
+	sinfoMainJsonify.Stdin = &outb
+
+	sinfoMainRead, sinfoMainWrite := io.Pipe()
+	sinfoMainJsonify.Stdout = sinfoMainWrite
+
+	if err := sinfoMainJsonify.Start(); err != nil {
+		return nil, err
+	}
+
+	go func() {
+		sinfoMainJsonify.Wait()
+		sinfoMainWrite.Close()
+	}()
+
+	sinfoAMemRaw := exec.Command("sinfo", []string{"--all","-e","-h","-O","NodeAddr,PartitionName,AllocMem"}...)
+	sinfoAMemJsonifyRead, sinfoAMemJsonifyWrite := io.Pipe()
+	sinfoAMemRaw.Stdout = sinfoAMemJsonifyWrite
+
+	if err := sinfoAMemRaw.Start(); err != nil {
+		return nil, err
+	}
+
+	go func() {
+		sinfoAMemRaw.Wait() // Ensure sinfoAMemRaw is properly waited upon
+		sinfoAMemJsonifyWrite.Close()
+	}()
+
+	sinfoAMemJsonify := exec.Command("sh", "-c", "tr -s ' ' | jq -nR -c '[inputs | split(\" \") | {n: .[0], p: .[1], amem: .[2]|tonumber }]'")
+	sinfoAMemJsonify.Stdin = sinfoAMemJsonifyRead
+	sinfoAMemRead, sinfoAMemWrite := io.Pipe()
+	sinfoAMemJsonify.Stdout = sinfoAMemWrite
+
+	if err := sinfoAMemJsonify.Start(); err != nil {
+		return nil, err
+	}
+
+	go func() {
+		sinfoAMemJsonify.Wait()
+		sinfoAMemWrite.Close()
+	}()
+
+	combinedReader := io.MultiReader(sinfoMainRead, sinfoAMemRead)
+
+	/*
+	processedOutput, _ = io.ReadAll(combinedReader)
+	slog.Error(fmt.Sprintf("%s","combinedReader json"))
+    slog.Error(fmt.Sprintf("%s",string(processedOutput)))
+	*/
+
+	combined := exec.Command("jq",[]string{"-c","--slurp",".[0][] as $file1 | .[1][] as $file2 | select($file1.n == $file2.n and $file1.p == $file2.p) | ($file1 + $file2)"}...)
+
+	combined.Stdin = combinedReader
+
+	var combinedOut,combinedErr bytes.Buffer
+	combined.Stdout = &combinedOut
+	combined.Stderr = &combinedErr
+
+	if err := combined.Start(); err != nil {
+		return nil, err
+	}
+
+
+	if err := combined.Wait(); err != nil {
+		slog.Error(fmt.Sprintf("failed to wait for combined jq command: %v", err))
+		slog.Error(fmt.Sprintf("failed to wait for combined jq command: %v", combinedErr.String()))
+	}
+
+	// slog.Info(fmt.Sprintf("new sinfo: %s",combinedOut.String()))
+
+	return combinedOut.Bytes(), nil
 }
 
 func NewCliScraper(args ...string) *CliScraper {
